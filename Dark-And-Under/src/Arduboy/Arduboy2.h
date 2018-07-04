@@ -164,8 +164,6 @@ class Arduboy2Base : public Arduboy2Core
  public:
   Arduboy2Base();
 
-  
-
   /** \brief
    * An object created to provide audio control functions within this class.
    *
@@ -177,8 +175,6 @@ class Arduboy2Base : public Arduboy2Core
    */
   Arduboy2Audio audio;
 
-
-  
   /** \brief
    * Initialize the hardware, display the boot logo, provide boot utilities, etc.
    *
@@ -645,8 +641,8 @@ class Arduboy2Base : public Arduboy2Core
    *
    * \details
    * The Arduino random number generator is seeded with a random value
-   * derived from entropy from an ADC reading of a floating pin combined with
-   * the microseconds since boot.
+   * derrived from entropy from the temperature, voltage reading, and
+   * microseconds since boot.
    *
    * This method is still most effective when called after a semi-random time,
    * such as after a user hits a button to start a game or other semi-random
@@ -745,7 +741,7 @@ class Arduboy2Base : public Arduboy2Core
    * is being held down:
    *
    * \code
-   * if (arduboy.everyXFrames(5)) {
+   * if (arduboy.everyXframes(5)) {
    *   if arduboy.pressed(A_BUTTON) {
    *     fireShot();
    *   }
@@ -874,7 +870,6 @@ class Arduboy2Base : public Arduboy2Core
    * \see pollButtons() justReleased()
    */
   bool justPressed(uint8_t button);
-//  uint8_t justPressedButtons();
 
   /** \brief
    * Check if a button has just been released.

@@ -5,6 +5,7 @@
  */
 
 #include "Arduboy2Core.h"
+#include <avr/wdt.h>
 
 const uint8_t PROGMEM lcdBootProgram[] = {
   // boot defaults are commented out but left here in case they
@@ -15,10 +16,11 @@ const uint8_t PROGMEM lcdBootProgram[] = {
   // Display Off
   // 0xAE,
 
+  #if !defined OLED_SH1106 // Not supported on SH1106 
   // Set Display Clock Divisor v = 0xF0
   // default is 0x80
-  0xD5, 0xF0,
-
+    0xD5, 0xF0,
+  #endif
   // Set Multiplex Ratio v = 0x3F
   // 0xA8, 0x3F,
 
@@ -44,7 +46,7 @@ const uint8_t PROGMEM lcdBootProgram[] = {
 
   // Set Contrast v = 0xCF
   0x81, 0xCF,
-
+	
   // Set Precharge = 0xF1
   0xD9, 0xF1,
 
@@ -60,7 +62,11 @@ const uint8_t PROGMEM lcdBootProgram[] = {
   // Display On
   0xAF,
 
-  // set display mode = horizontal addressing mode (0x00)
+#if defined OLED_SH1106 // required for SH1106 only
+  //Set column address for left most pixel 
+  OLED_SET_COLUMN_ADDRESS_LO 
+#else // these commands are only supported by SSD1306 and SSD1309
+  // set display mode = horizontal addressing mode (0x00) 
   0x20, 0x00,
 
   // set col address range
@@ -68,8 +74,11 @@ const uint8_t PROGMEM lcdBootProgram[] = {
 
   // set page address range
   // 0x22, 0x00, PAGE_ADDRESS_END
+#endif  
+#if defined OLED_SSD1309 //required for SSD1309
+  0x21, 0x00, COLUMN_ADDRESS_END
+#endif
 };
-
 
 Arduboy2Core::Arduboy2Core() { }
 
@@ -111,27 +120,40 @@ void Arduboy2Core::setCPUSpeed8MHz()
 void Arduboy2Core::bootPins()
 {
 #ifdef ARDUBOY_10
-
   // Port B INPUT_PULLUP or HIGH
-  PORTB |= _BV(RED_LED_BIT) | _BV(GREEN_LED_BIT) | _BV(BLUE_LED_BIT) |
-           _BV(B_BUTTON_BIT);
+  PORTB |= _BV(RED_LED_BIT) |
+  #ifndef ARDUINO_AVR_PROMICRO
+           _BV(GREEN_LED_BIT) |
+  #endif
+		   _BV(BLUE_LED_BIT) | _BV(B_BUTTON_BIT);
   // Port B INPUT or LOW (none)
   // Port B inputs
   DDRB &= ~(_BV(B_BUTTON_BIT));
   // Port B outputs
-  DDRB |= _BV(RED_LED_BIT) | _BV(GREEN_LED_BIT) | _BV(BLUE_LED_BIT) |
-          _BV(SPI_MOSI_BIT) | _BV(SPI_SCK_BIT);
+  DDRB |= _BV(RED_LED_BIT) | 
+  #ifndef ARDUINO_AVR_PROMICRO
+          _BV(GREEN_LED_BIT) | 
+  #endif
+		  _BV(BLUE_LED_BIT) | _BV(SPI_MOSI_BIT) | _BV(SPI_SCK_BIT);
 
   // Port C
   // Speaker: Not set here. Controlled by audio class
 
   // Port D INPUT_PULLUP or HIGH
-  PORTD |= _BV(CS_BIT);
+  #ifdef ARDUINO_AVR_PROMICRO
+    PORTD |= _BV(CS_BIT) | _BV(GREEN_LED_BIT);
+  #else
+    PORTD |= _BV(CS_BIT);
+  #endif
   // Port D INPUT or LOW
   PORTD &= ~(_BV(RST_BIT));
   // Port D inputs (none)
   // Port D outputs
-  DDRD |= _BV(RST_BIT) | _BV(CS_BIT) | _BV(DC_BIT);
+  DDRD |= _BV(RST_BIT) | _BV(CS_BIT) |
+  #ifdef ARDUINO_AVR_PROMICRO
+    _BV(GREEN_LED_BIT) |
+  #endif
+  _BV(DC_BIT);
 
   // Port E INPUT_PULLUP or HIGH
   PORTE |= _BV(A_BUTTON_BIT);
@@ -209,17 +231,17 @@ void Arduboy2Core::bootOLED()
   }
   LCDDataMode();
 }
-
-void Arduboy2Core::LCDDataMode()
+/* replaced by define macro compiling to single instruction
+inline void Arduboy2Core::LCDDataMode()
 {
   bitSet(DC_PORT, DC_BIT);
 }
-
+*//* replaced by define macro compiling to single instruction
 void Arduboy2Core::LCDCommandMode()
 {
   bitClear(DC_PORT, DC_BIT);
 }
-
+*/
 // Initialize the SPI interface for the display
 void Arduboy2Core::bootSPI()
 {
@@ -305,16 +327,51 @@ void Arduboy2Core::paint8Pixels(uint8_t pixels)
 
 void Arduboy2Core::paintScreen(const uint8_t *image)
 {
+#if defined OLED_SH1106	
+  for (uint8_t i = 0; i < HEIGHT / 8; i++)
+  {
+  	LCDCommandMode();
+  	SPDR = (OLED_SET_PAGE_ADDRESS + i);
+	while (!(SPSR & _BV(SPIF)));
+  	SPDR = (OLED_SET_COLUMN_ADDRESS_HI); // we only need to reset hi nibble to 0
+	while (!(SPSR & _BV(SPIF)));
+  	LCDDataMode();
+  	for (uint8_t j = WIDTH; j > 0; j--)
+      {
+  		SPDR = pgm_read_byte(*(image++));
+		while (!(SPSR & _BV(SPIF)));
+      }
+  }
+#else //default OLED SSD1306
   for (int i = 0; i < (HEIGHT*WIDTH)/8; i++)
   {
     SPItransfer(pgm_read_byte(image + i));
   }
+#endif  
 }
 
 // paint from a memory buffer, this should be FAST as it's likely what
 // will be used by any buffer based subclass
 void Arduboy2Core::paintScreen(uint8_t image[], bool clear)
 {
+#if defined OLED_SH1106
+  for (uint8_t i = 0; i < HEIGHT / 8; i++)
+  {
+  	LCDCommandMode();
+  	SPDR = (OLED_SET_PAGE_ADDRESS + i);
+	while (!(SPSR & _BV(SPIF)));
+  	SPDR = (OLED_SET_COLUMN_ADDRESS_HI); // we only need to reset hi nibble to 0
+	while (!(SPSR & _BV(SPIF)));
+  	LCDDataMode();
+  	for (uint8_t j = WIDTH; j > 0; j--)
+  	{
+  		SPDR = *(image);
+  		if (clear) *(image) = 0;
+		*(image++);
+		while (!(SPSR & _BV(SPIF)));
+  	}
+  }	
+#else	
   uint8_t c;
   int i = 0;
 
@@ -348,12 +405,30 @@ void Arduboy2Core::paintScreen(uint8_t image[], bool clear)
     SPDR = c;
   }
   while (!(SPSR & _BV(SPIF))) { } // wait for the last byte to be sent
+  #endif
 }
 
 void Arduboy2Core::blank()
 {
+#if defined OLED_SH1106
+  for (uint8_t i = 0; i < HEIGHT / 8; i++)
+  {
+  	LCDCommandMode();
+  	SPDR = (0xB0 + i); 				//Select OLED PAGE
+	while (!(SPSR & _BV(SPIF)));
+  	SPDR = (0x10);     				//Select COLUMN address high nibble of column address
+	while (!(SPSR & _BV(SPIF)));
+  	LCDDataMode();
+  	for (uint8_t j = WIDTH; j > 0; j--)
+  	{
+      SPDR = 0;
+      while (!(SPSR & _BV(SPIF)));
+  	}
+  }	
+#else	
   for (int i = 0; i < (HEIGHT*WIDTH)/8; i++)
     SPItransfer(0x00);
+#endif
 }
 
 void Arduboy2Core::sendLCDCommand(uint8_t command)
@@ -455,18 +530,34 @@ uint8_t Arduboy2Core::buttonsState()
   // down, left, up
   buttons = ((~PINB) & B01110000);
   // right button
-  buttons = buttons | (((~PINC) & B01000000) >> 4);
+  //buttons = buttons | (((~PINC) & B01000000) >> 4);
+  if ((PINC & B01000000) == 0) buttons |= 0x04; //compiles to shorter and faster code
   // A and B
-  buttons = buttons | (((~PINF) & B11000000) >> 6);
+  //buttons = buttons | (((~PINF) & B11000000) >> 6);
+  if ((PINF & B10000000) == 0) buttons |= 0x02; //compiles to shorter and faster code
+  if ((PINF & B01000000) == 0) buttons |= 0x01; 
 #elif defined(ARDUBOY_10)
-  // down, up, left right
+  // up, right, left, down
   buttons = ((~PINF) & B11110000);
   // A (left)
-  buttons = buttons | (((~PINE) & B01000000) >> 3);
+  //buttons = buttons | (((~PINE) & B01000000) >> 3);
+  if ((PINE & B01000000) == 0) {buttons |= 0x08;} //compiles to shorter and faster code
   // B (right)
-  buttons = buttons | (((~PINB) & B00010000) >> 2);
+  // buttons = buttons | (((~PINB) & B00010000) >> 2);
+  if ((PINB & B00010000) == 0) {buttons |= 0x04;} //compiles to shorter and faster code
 #endif
-
+#if defined ENABLE_BOOTLOADER_KEYS
+  //bootloader button combo
+  if (buttons == (LEFT_BUTTON | UP_BUTTON | A_BUTTON | B_BUTTON))
+  { cli();
+	//set magic boot key
+    *(uint8_t *)0x0800 = 0x77;
+	*(uint8_t *)0x0801 = 0x77;
+	//enable and trigger watchdog by timeout
+	wdt_enable(WDTO_15MS); 
+	for (;;);
+  }
+#endif
   return buttons;
 }
 
